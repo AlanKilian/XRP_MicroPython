@@ -2,7 +2,9 @@ from .encoded_motor import EncodedMotor
 from .imu import IMU
 from .controller import Controller
 from .pid import PID
+from .trajectory import TrapezoidPositionGenerator
 from .timeout import Timeout
+from .board import Board
 import time
 import math
 
@@ -49,6 +51,17 @@ class DifferentialDrive:
         self.brake_at_zero_power = False
         self.wheel_diam = wheel_diam
         self.track_width = wheel_track
+        
+        self.debuglevel = 0
+        
+    def set_debuglevel(self, debuglevel: int) -> None:
+        """
+        Set the raw effort of both motors individually
+
+        :param leftEffort: Set the level of debug printing
+        :type leftEffort: integer
+        """
+        self.debuglevel = debuglevel
 
     def set_effort(self, left_effort: float, right_effort: float) -> None:
         """
@@ -298,6 +311,93 @@ class DifferentialDrive:
             self.set_effort(-turn_speed - encoder_correction, turn_speed - encoder_correction)
 
             time.sleep(0.01)
+
+        self.stop()
+
+        return not time_out.is_done()
+
+    def straightTrajectory(self, distance: float, timeout: float = None, trajectory: Trajectory = None, left_controller: Controller = None, right_controller: Controller = None, secondary_controller: Controller = None) -> bool:
+        """
+        Go forward the specified distance in centimeters, and exit function when distance has been reached.
+        Max_effort is bounded from -1 (reverse at full speed) to 1 (forward at full speed)
+
+        :param distance: The distance for the robot to travel (In Centimeters)
+        :type distance: float
+        :param timeout: The amount of time before the robot stops trying to move forward and continues to the next step (In Seconds)
+        :type timeout: float
+        :param left_controller: The left wheel controller, for handling the distance driven forwards
+        :type left_controller: Controller
+        :param right_controller: The right wheel controller, for handling the distance driven forwards
+        :type right_controller: Controller
+        :param secondary_controller: The secondary controller, for correcting heading error that may result during the drive.
+        :type secondary_controller: Controller
+        :return: if the distance was reached before the timeout
+        :rtype: bool
+        """
+        
+        board = Board()
+        time_out = Timeout(timeout)
+        if self.debuglevel > 0:
+            print(f"Timeout set to  {timeout}")
+            if not board.are_motors_powered():
+                print("MOTORS ARE NOT POWERED ON")
+
+        starting_left = self.get_left_encoder_position()
+        starting_right = self.get_right_encoder_position()
+
+        if left_controller is None:
+            left_controller = PID(
+                kp = 2.0,
+                kd = 0.05,
+                )
+            
+        if right_controller is None:
+            right_controller = PID(
+                kp = 2.0,
+                kd = 0.05,
+                )
+
+        # Secondary controller to keep encoder values in sync
+        if secondary_controller is None:
+            secondary_controller = PID(
+                kp = 0.075, kd=0.001,
+            )
+
+        if self.imu is not None:
+            # record current heading to maintain it
+            initial_heading = self.imu.get_yaw()
+        else:
+            initial_heading = 0
+
+        if trajectory is None:
+            trajectory = TrapezoidPositionGenerator(start_pos=0, end_pos=distance, max_vel=2000, accel=150)
+        
+        while True:
+            # calculate the distance traveled
+            left_position = self.get_left_encoder_position() - starting_left
+            right_position = self.get_right_encoder_position() - starting_right
+            
+            running, target = trajectory.get_target()
+            
+            if running == False or time_out.is_done():
+                break
+            
+            left_error = target - left_position
+            right_error = target - right_position
+            # print(f"running {running} Target = {target} Error = {right_error}")
+
+            # PID for distance
+            left_effort = left_controller.update(left_error)
+            right_effort = right_controller.update(right_error)
+            
+            self.set_effort(left_effort, right_effort)
+            
+            time.sleep(0.01)
+            
+            if time_out.is_done():
+                if self.debuglevel > 0:
+                    print("Timeout")
+                break
 
         self.stop()
 
