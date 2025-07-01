@@ -338,7 +338,7 @@ class DifferentialDrive:
         board = Board()
         time_out = Timeout(timeout)
         if self.debuglevel > 0:
-            print(f"Timeout set to  {timeout}")
+            print(f"Move {distance} centimeters. Timeout set to  {timeout}")
             if not board.are_motors_powered():
                 print("MOTORS ARE NOT POWERED ON")
 
@@ -370,7 +370,7 @@ class DifferentialDrive:
             initial_heading = 0
 
         if trajectory is None:
-            trajectory = TrapezoidPositionGenerator(start_pos=0, end_pos=distance, max_vel=2000, accel=150)
+            trajectory = TrapezoidPositionGenerator(start_pos=0, end_pos=distance, max_vel=2000, accel=150, debuglevel=self.debuglevel)
         
         while True:
             # calculate the distance traveled
@@ -384,7 +384,8 @@ class DifferentialDrive:
             
             left_error = target - left_position
             right_error = target - right_position
-            # print(f"running {running} Target = {target} Error = {right_error}")
+            if self.debuglevel > 1:
+                print(f"target is {target} left_error is {left_error}")
 
             # PID for distance
             left_effort = left_controller.update(left_error)
@@ -402,4 +403,4 @@ class DifferentialDrive:
         self.stop()
 
         return not time_out.is_done()
-        
+    
